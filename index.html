@@ -110,32 +110,81 @@
 <script>
 /* ===== CONFIG ===== */
 const SHEETDB_BASE = "https://sheetdb.io/api/v1/8pmdh33s9fvy8";
-const SHEETS = { PATIENTS:"Patients", TOKENS:"LinkTokens", SCORES:"Scores_QFC" }; // <-- ajuste o nome da aba se precisar
-const CODE = "QFC"; // código salvo na planilha
+const SHEETS = { PATIENTS:"Patients", TOKENS:"LinkTokens", SCORES:"Scores_QFC" };
+const CODE = "QFC";
 const PORTAL_URL = "https://integradaneuropsicologia.github.io/formularios/";
-const RELEASE_KEYS = ["QFC"]; // ajuste para o nome da coluna de liberação no Patients
+const RELEASE_KEYS = ["QFC"]; // colunas no Patients que liberam o formulário com "sim"
 
 /* ===== HELPERS ===== */
 const $ = s => document.querySelector(s);
 const onlyDigits = s => (s||"").replace(/\D+/g,"");
 const qs = k => new URLSearchParams(location.search).get(k) || "";
-function setBox(id, text, kind="ok"){ const el=$(id); if(!el) return; el.textContent = text; el.className = "msg " + (kind==="ok"?"okbox":kind==="warn"?"warnbox":"errbox"); el.style.display = "block"; }
-function hideBox(id){ const el=$(id); if(el){ el.style.display="none"; el.textContent=""; } }
-function maskCPF(cpf){ const d = onlyDigits(cpf||""); if(d.length!==11) return cpf||""; return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`; }
-function fmtDateISO(iso){ if(!iso) return ""; const [y,m,d] = String(iso||"").split("-"); if(!y||!m||!d) return iso; return `${d}/${m}/${y}`; }
-async function GET(url){ const r=await fetch(url); if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); }
-async function sheetSearch(sheet, params){ const usp = new URLSearchParams(params); return GET(`${SHEETDB_BASE}/search?sheet=${encodeURIComponent(sheet)}&${usp.toString()}`); }
-async function sheetCreate(sheet, row){ const r = await fetch(`${SHEETDB_BASE}?sheet=${encodeURIComponent(sheet)}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ data:[row] }) }); if(!r.ok) throw new Error(await r.text()); return r.json(); }
-async function sheetPatchBy(sheet, column, value, data){ const r = await fetch(`${SHEETDB_BASE}/${encodeURIComponent(column)}/${encodeURIComponent(value)}?sheet=${encodeURIComponent(sheet)}`, { method:"PATCH", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ data }) }); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+
+function setBox(id, text, kind="ok"){
+  const el=$(id); if(!el) return;
+  el.textContent = text;
+  el.className = "msg " + (kind==="ok"?"okbox":kind==="warn"?"warnbox":"errbox");
+  el.style.display = "block";
+}
+function hideBox(id){
+  const el=$(id);
+  if(el){ el.style.display="none"; el.textContent=""; }
+}
+function maskCPF(cpf){
+  const d = onlyDigits(cpf||"");
+  if(d.length!==11) return cpf||"";
+  return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
+}
+function fmtDateISO(iso){
+  if(!iso) return "";
+  const [y,m,d] = String(iso||"").split("-");
+  if(!y||!m||!d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+async function GET(url){
+  const r=await fetch(url);
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+async function sheetSearch(sheet, params){
+  const usp = new URLSearchParams(params);
+  return GET(`${SHEETDB_BASE}/search?sheet=${encodeURIComponent(sheet)}&${usp.toString()}`);
+}
+async function sheetCreate(sheet, row){
+  const r = await fetch(
+    `${SHEETDB_BASE}?sheet=${encodeURIComponent(sheet)}`,
+    {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ data:[row] })
+    }
+  );
+  if(!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+async function sheetPatchBy(sheet, column, value, data){
+  const r = await fetch(
+    `${SHEETDB_BASE}/${encodeURIComponent(column)}/${encodeURIComponent(value)}?sheet=${encodeURIComponent(sheet)}`,
+    {
+      method:"PATCH",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ data })
+    }
+  );
+  if(!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 function goPortalWithToken(){
   const TOKEN = qs("token");
   try{
     const u = new URL(PORTAL_URL, location.href);
-    u.searchParams.set("token", TOKEN);
+    if (TOKEN) u.searchParams.set("token", TOKEN);
     location.href = u.toString();
   }catch(_){
     const sep = PORTAL_URL.includes("?") ? "&" : "?";
-    location.href = PORTAL_URL + sep + "token=" + encodeURIComponent(TOKEN);
+    location.href = PORTAL_URL + (TOKEN ? sep + "token=" + encodeURIComponent(TOKEN) : "");
   }
 }
 
@@ -168,11 +217,24 @@ const ITEMS = [
   "Você não consegue pensar em nada para dizer?"
 ];
 
+// mesma escala usada tanto pra render quanto pra gerar resumo humano
+const OPTIONS = [
+  {v:0, label:"Nunca"},
+  {v:1, label:"Raramente"},
+  {v:2, label:"Ocasionalmente"},
+  {v:3, label:"Frequentemente"},
+  {v:4, label:"Quase sempre"}
+];
+const LABEL_BY_VAL = OPTIONS.reduce((acc,o)=>{ acc[o.v]=o.label; return acc; },{});
+
 /* ===== RENDER ===== */
 function renderQuestions(){
   const host = $("#qs"); host.innerHTML = "";
+
   ITEMS.forEach((text, idx)=>{
-    const q = idx+1, qn = String(q).padStart(2,"0");
+    const q = idx+1;
+    const qn = String(q).padStart(2,"0");
+
     const row = document.createElement('div');
     row.className = 'item';
     row.setAttribute('data-q', String(q));
@@ -185,16 +247,9 @@ function renderQuestions(){
     const scale = document.createElement('div');
     scale.className = 'scale';
 
-    // 0..4 em botões/“chips”
-    const OPTIONS = [
-      {v:0, label:"Nunca"},
-      {v:1, label:"Raramente"},
-      {v:2, label:"Ocasionalmente"},
-      {v:3, label:"Frequentemente"},
-      {v:4, label:"Quase sempre"},
-    ];
     OPTIONS.forEach(opt=>{
-      const lab = document.createElement('label'); lab.className = 'chip';
+      const lab = document.createElement('label');
+      lab.className = 'chip';
       lab.setAttribute('title', `${opt.label} (${opt.v})`);
       lab.innerHTML = `
         <input type="radio" name="q${qn}" value="${opt.v}" required aria-labelledby="s${qn}">
@@ -212,17 +267,26 @@ function renderQuestions(){
 let patient=null, tokenRow=null, CPF="";
 const TOKEN = qs("token");
 const STORAGE_KEY = `QFC_${TOKEN||'anon'}`;
+let startAt = Date.now(); // timestamp pra calcular duração de preenchimento
 
-/* ===== BOOT ===== */
+/* ===== PACIENTE / TOKEN / LIBERAÇÃO ===== */
 (async function boot(){
   try{
-    if(!TOKEN){ setBox("#alert","Link inválido (sem token). Solicite um novo link.","err"); return; }
+    if(!TOKEN){
+      setBox("#alert","Link inválido (sem token). Solicite um novo link.","err");
+      return;
+    }
 
     const trows = await sheetSearch(SHEETS.TOKENS, { token: TOKEN });
     if(!trows || !trows.length) throw new Error("Token inválido ou expirado.");
     tokenRow = trows[0];
-    if(String(tokenRow.disabled||"não").toLowerCase()==="sim") throw new Error("Token desativado. Peça um novo link.");
-    if(tokenRow.expires_at && new Date(tokenRow.expires_at) < new Date()) throw new Error("Token expirado. Peça um novo link.");
+
+    if(String(tokenRow.disabled||"não").toLowerCase()==="sim")
+      throw new Error("Token desativado. Peça um novo link.");
+
+    if(tokenRow.expires_at && new Date(tokenRow.expires_at) < new Date())
+      throw new Error("Token expirado. Peça um novo link.");
+
     CPF = onlyDigits(tokenRow.cpf||"");
     if(!CPF) throw new Error("Token sem CPF vinculado.");
 
@@ -230,19 +294,29 @@ const STORAGE_KEY = `QFC_${TOKEN||'anon'}`;
     if(!prows || !prows.length) throw new Error("Paciente não encontrado.");
     patient = prows[0];
 
-    const isAllowed = RELEASE_KEYS.some(k => String(patient[k]||"").trim().toLowerCase()==="sim");
-    if(!isAllowed){ setBox("#alert","Este formulário não está liberado para você.","err"); return; }
-
-    // Checa se já respondeu
-    const doneKeys = RELEASE_KEYS.map(k => `${k}_FEITO`);
-    const anyDoneFlag = doneKeys.some(k => String(patient[k]||"").trim().toLowerCase()==="sim");
-    const already = await sheetSearch(SHEETS.SCORES, { cpf: CPF, code: CODE });
-    if(anyDoneFlag || (already && already.length)){
-      setBox("#alert","Você já respondeu este formulário. Voltando ao portal…","ok");
-      setTimeout(goPortalWithToken, 1200); return;
+    // checa se o paciente tem liberação pra este formulário
+    const isAllowed = RELEASE_KEYS.some(
+      k => String(patient[k]||"").trim().toLowerCase()==="sim"
+    );
+    if(!isAllowed){
+      setBox("#alert","Este formulário não está liberado para você.","err");
+      return;
     }
 
-    // Render
+    // já respondeu antes?
+    const doneKeys = RELEASE_KEYS.map(k => `${k}_FEITO`);
+    const anyDoneFlag = doneKeys.some(
+      k => String(patient[k]||"").trim().toLowerCase()==="sim"
+    );
+    const already = await sheetSearch(SHEETS.SCORES, { cpf: CPF, code: CODE });
+
+    if(anyDoneFlag || (already && already.length)){
+      setBox("#alert","Você já respondeu este formulário. Voltando ao portal…","ok");
+      setTimeout(goPortalWithToken, 1200);
+      return;
+    }
+
+    // ok, pode responder
     renderPatientInfo();
     renderQuestions();
     restoreDraft();
@@ -253,6 +327,7 @@ const STORAGE_KEY = `QFC_${TOKEN||'anon'}`;
     $("#progressWrap").style.display = "block";
     hideBox("#alert");
 
+    startAt = Date.now();
   }catch(err){
     console.error(err);
     setBox("#alert", err.message || "Falha ao abrir o formulário. Tente novamente mais tarde.", "err");
@@ -284,7 +359,11 @@ function saveDraft(){
     const sel = document.querySelector(`input[name="q${qn}"]:checked`);
     if(sel) data[`q${qn}`] = Number(sel.value);
   }
-  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }catch(e){ console.warn("Sem espaço para salvar rascunho"); }
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }catch(e){
+    console.warn("Sem espaço para salvar rascunho");
+  }
 }
 function restoreDraft(){
   try{
@@ -297,25 +376,100 @@ function restoreDraft(){
     }
   }catch(e){ /* ignore */ }
 }
-function clearDraft(){ localStorage.removeItem(STORAGE_KEY); }
+function clearDraft(){
+  try { localStorage.removeItem(STORAGE_KEY); } catch(e){}
+}
 
-function countAnswered(){ let c=0; for(let i=1;i<=ITEMS.length;i++){ const qn=String(i).padStart(2,'0'); if(document.querySelector(`input[name="q${qn}"]:checked`)) c++; } return c; }
-function updateProgress(){ const answered = countAnswered(); const total = ITEMS.length; $("#progressText").textContent = `Progresso: ${answered}/${total}`; $("#bar").style.width = `${(answered/total)*100}%`; }
+/* ===== PROGRESSO ===== */
+function countAnswered(){
+  let c=0;
+  for(let i=1;i<=ITEMS.length;i++){
+    const qn=String(i).padStart(2,'0');
+    if(document.querySelector(`input[name="q${qn}"]:checked`)) c++;
+  }
+  return c;
+}
+function updateProgress(){
+  const answered = countAnswered();
+  const total = ITEMS.length;
+  $("#progressText").textContent = `Progresso: ${answered}/${total}`;
+  $("#bar").style.width = `${(answered/total)*100}%`;
+}
 
-/* ===== EVENTOS DE UI ===== */
-addEventListener('change', (e)=>{ if(e.target && e.target.matches('input[type="radio"][name^="q"]')){ saveDraft(); updateProgress(); } });
-$("#btnSave").addEventListener('click', ()=>{ saveDraft(); setBox('#msg','Rascunho salvo neste dispositivo.','ok'); });
-$("#clearDraft").addEventListener('click', ()=>{ clearDraft(); setBox('#msg','Rascunho apagado.','warn'); });
+/* eventos UI */
+addEventListener('change', (e)=>{
+  if(e.target && e.target.matches('input[type="radio"][name^="q"]')){
+    saveDraft();
+    updateProgress();
+  }
+});
+$("#btnSave").addEventListener('click', ()=>{
+  saveDraft();
+  setBox('#msg','Rascunho salvo neste dispositivo.','ok');
+});
+$("#clearDraft").addEventListener('click', ()=>{
+  clearDraft();
+  setBox('#msg','Rascunho apagado.','warn');
+});
+
+/* ===== RESPOSTAS LEGÍVEIS ===== */
+function collectAnswersMap(){
+  // { q01:2, q02:0, ... }
+  const out={};
+  for(let i=1;i<=ITEMS.length;i++){
+    const qn = `q${String(i).padStart(2,"0")}`;
+    const sel = document.querySelector(`input[name="${qn}"]:checked`);
+    if(sel) out[qn] = Number(sel.value);
+  }
+  return out;
+}
+function collectQuestionsReadable(){
+  // "1. texto => Ocasionalmente", etc.
+  const lines=[];
+  for(let i=1;i<=ITEMS.length;i++){
+    const qn = `q${String(i).padStart(2,"0")}`;
+    const sel = document.querySelector(`input[name="${qn}"]:checked`);
+    const label = sel ? LABEL_BY_VAL[ Number(sel.value) ] : "—";
+    lines.push(`${i}. ${ITEMS[i-1]} => ${label}`);
+  }
+  return lines.join("\n");
+}
+
+/* ===== INTERPRETAÇÃO =====
+   total vai de 0 a 100 (25 itens x máximo 4)
+   Abaixo um rótulo simples por faixas percentuais:
+   - <20%: queixas muito ocasionais
+   - <40%: leves
+   - <60%: moderadas
+   - >=60%: frequentes / potencial impacto funcional percebido
+*/
+function interpretarQFC(total){
+  const max_total = ITEMS.length * 4; // normalmente 100
+  const p = total / max_total;        // 0.00 - 1.00
+
+  if (p < 0.20) return "Queixas cognitivas muito ocasionais no dia a dia.";
+  if (p < 0.40) return "Queixas cognitivas leves (esquecimentos/distrabilidade esporádicos).";
+  if (p < 0.60) return "Queixas cognitivas moderadas, possivelmente percebidas na rotina.";
+  return "Queixas cognitivas frequentes, com potencial impacto funcional percebido.";
+}
 
 /* ===== SUBMIT ===== */
 let sending=false;
 $("#form").addEventListener("submit", async (e)=>{
-  e.preventDefault(); if(sending) return; sending = true; hideBox("#msg");
-  const btn = $("#btnSubmit"); const originalText = btn.textContent; btn.disabled = true; btn.textContent = "Enviando…";
+  e.preventDefault();
+  if(sending) return;
+  sending = true;
+  hideBox("#msg");
+
+  const btn = $("#btnSubmit");
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Enviando…";
+
   try{
     if(!patient) throw new Error("Sessão inválida. Recarregue o link.");
 
-    // Validação: todas respondidas
+    // validação: todas respondidas
     for(let i=1;i<=ITEMS.length;i++){
       const qn = String(i).padStart(2,'0');
       const sel = document.querySelector(`input[name="q${qn}"]:checked`);
@@ -326,13 +480,33 @@ $("#form").addEventListener("submit", async (e)=>{
       }
     }
 
-    // Soma TOTAL (0..100)
+    // mapa bruto das respostas e soma total
+    const answersMap = collectAnswersMap();
     let total = 0;
-    for(let i=1;i<=ITEMS.length;i++){
-      const qn = String(i).padStart(2,'0');
-      total += Number(document.querySelector(`input[name="q${qn}"]:checked`).value);
+    for(const v of Object.values(answersMap)){
+      total += v;
     }
 
+    // string pergunta => rótulo de resposta, pro laudo / métrica humana
+    const questionsReadable = collectQuestionsReadable();
+
+    // métricas extras
+    const max_total = ITEMS.length * 4; // 100
+    const durationSec = Math.round((Date.now() - startAt)/1000);
+    const percent_total = Number((total / max_total).toFixed(4));
+
+    const categoria_txt = interpretarQFC(total);
+
+    const metricsObj = {
+      answers: answersMap,
+      total,
+      max_total,
+      percent_total,
+      duration_sec: durationSec,
+      interpretation: categoria_txt
+    };
+
+    // grava linha em Scores
     await sheetCreate(SHEETS.SCORES, {
       result_id: `${patient.cpf}_${CODE}_${Date.now()}`,
       token: TOKEN,
@@ -341,14 +515,20 @@ $("#form").addEventListener("submit", async (e)=>{
       source: "paciente",
       submitted_at: new Date().toISOString(),
       total: total,
-      categoria: "",   // sem subescalas neste instrumento
-      metrics: ""
+      categoria: categoria_txt,
+      metrics: "",
+      questions: questionsReadable
     });
 
-    // Marca como feito no Patients
+    // marca como feito no Patients
     const doneUpdates = {};
-    RELEASE_KEYS.map(k=>`${k}_FEITO`).forEach(k=>{ if(k in patient) doneUpdates[k] = "sim"; });
-    if(Object.keys(doneUpdates).length===0) doneUpdates[`${RELEASE_KEYS[0]}_FEITO`] = "sim";
+    RELEASE_KEYS.map(k=>`${k}_FEITO`).forEach(k=>{
+      if(k in patient) doneUpdates[k] = "sim";
+    });
+    if(Object.keys(doneUpdates).length===0){
+      // fallback: cria campo *_FEITO se não existir
+      doneUpdates[`${RELEASE_KEYS[0]}_FEITO`] = "sim";
+    }
     await sheetPatchBy(SHEETS.PATIENTS, "cpf", patient.cpf, doneUpdates);
 
     clearDraft();
@@ -358,10 +538,12 @@ $("#form").addEventListener("submit", async (e)=>{
   }catch(err){
     console.error(err);
     setBox("#msg", err.message || "Falha ao enviar. Tente novamente.", "err");
-    sending = false; btn.disabled = false; btn.textContent = originalText;
+    sending = false;
+    btn.disabled = false;
+    btn.textContent = originalText;
   }
 });
 </script>
+
 </body>
 </html>
-
